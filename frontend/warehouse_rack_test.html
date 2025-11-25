@@ -12,19 +12,14 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <!-- Three.js (本地端 module) -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "/frontend/components/build/three.module.js",
-      "three/examples/jsm/controls/OrbitControls.js":
-        "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js",
-      "three/examples/jsm/loaders/FontLoader.js":
-        "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FontLoader.js",
-      "three/examples/jsm/loaders/TextGeometry.js":
-        "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/geometries/TextGeometry.js"
-    }
+ <script type="importmap">
+{
+  "imports": {
+    "three": "/src/components/build/three.module.js",
+    "three/examples/jsm/": "/src/components/three/"
   }
-  </script>
+}
+</script>
 
   <style>
     html, body {
