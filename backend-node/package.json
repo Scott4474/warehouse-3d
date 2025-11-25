@@ -1,0 +1,12 @@
+{
+  "name": "warehouse-3d-websocket",
+  "version": "1.0.0",
+  "main": "src/websocket/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/websocket/server.js"
+  },
+  "dependencies": {
+    "ws": "^8.13.0"
+  }
+}
