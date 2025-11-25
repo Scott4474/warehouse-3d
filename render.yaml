@@ -1,5 +1,5 @@
 services:
-  # 1️⃣ Frontend 靜態網站（用 web + staticPublishPath 方式）
+  # 1️⃣ Frontend 靜態網站（用 web + static env）
   - type: web
     name: warehouse-3d-frontend
     rootDir: frontend
@@ -7,9 +7,8 @@ services:
     buildCommand: ""
     staticPublishPath: "."
     autoDeploy: true
-    plan: free
 
-  # 2️⃣ WebSocket (Node.js)
+  # 2️⃣ WebSocket backend (Node.js)
   - type: web
     name: warehouse-3d-websocket
     rootDir: backend-node
@@ -17,9 +16,8 @@ services:
     buildCommand: "npm install"
     startCommand: "node src/websocket/server.js"
     autoDeploy: true
-    plan: free
 
-  # 3️⃣ Python API (FastAPI)
+  # 3️⃣ Python API backend
   - type: web
     name: warehouse-3d-python-api
     rootDir: backend-python
@@ -27,4 +25,3 @@ services:
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.api.main:app --host 0.0.0.0 --port 10000"
     autoDeploy: true
-    plan: free
