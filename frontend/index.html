@@ -5,13 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Warehouse 3D</title>
 
-  <!-- Tailwind（用來做左側深色 UI） -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- 讀 / 寫 Excel -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-  <!-- three.js 模組路徑 -->
   <script type="importmap">
   {
     "imports": {
@@ -28,7 +25,7 @@
       overflow: hidden;
     }
     #viewport {
-      background: #020617; /* 深藍黑 */
+      background: #020617;
     }
   </style>
 </head>
@@ -36,7 +33,6 @@
 
 <div class="flex h-screen w-screen overflow-hidden">
 
-  <!-- 左側控制面板 -->
   <div class="w-80 bg-gray-800 p-5 space-y-4 overflow-y-auto">
 
     <h1 class="text-2xl font-bold mb-2">Warehouse 3D</h1>
@@ -117,7 +113,6 @@
 
   </div>
 
-  <!-- 3D 畫面 -->
   <div id="viewport" class="flex-1"></div>
 
 </div>
@@ -145,7 +140,6 @@
     searchBtn:     document.getElementById('searchBtn')
   };
 
-  // ===== 儲位編號轉換 =====
   const ROW_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const STORAGE_KEY_SLOTS = 'warehouse3d_slots_v1';
   const STORAGE_KEY_IMPORT_TIME = 'warehouse3d_import_time_v1';
@@ -171,7 +165,6 @@
   function pad2(n){ return String(n).padStart(2,'0'); }
   function slotKey(r,b,l){ return `${r}_${b}_${l}`; }
 
-  // ===== three.js 基本場景 =====
   const renderer = new THREE.WebGLRenderer({ antialias:true });
   function getSize(){
     const w = viewport.clientWidth || window.innerWidth;
@@ -199,19 +192,16 @@
   dir.position.set(-30, 40, 20);
   scene.add(dir);
 
-  // 大範圍 Grid（地板）
   const gridBase = new THREE.GridHelper(600, 60, 0x22c55e, 0x1e293b);
   gridBase.position.y = 0;
   scene.add(gridBase);
 
-  // 路徑規劃 Grid（上層細格）
   const gridRoute = new THREE.GridHelper(200, 40, 0x0ea5e9, 0x0f172a);
   gridRoute.position.y = 0.02;
   gridRoute.material.transparent = true;
   gridRoute.material.opacity = 0.35;
   scene.add(gridRoute);
 
-  // 中央一顆小方塊（原點）
   const originCube = new THREE.Mesh(
     new THREE.BoxGeometry(0.6,0.6,0.6),
     new THREE.MeshStandardMaterial({ color:0xeab308 })
@@ -219,30 +209,25 @@
   originCube.position.set(0,0.3,0);
   scene.add(originCube);
 
-  // 倉儲群組
   let warehouseGroup = new THREE.Group();
   scene.add(warehouseGroup);
 
   const raycaster = new THREE.Raycaster();
   const clock = new THREE.Clock();
 
-  const clickTargets = []; // hit boxes
-  const bins = [];         // 幾何 bin：{ row,bay,level,line,hit,cargo,occupied,meta,expStatus,baseX,baseY,baseZ }
+  const clickTargets = [];
+  const bins = [];
 
-  // 純邏輯儲位資料（可跨 Rebuild＆儲存 localStorage）
-  // key = "row_bay_level"
   const logicalSlots = new Map();
 
-  // 高亮搜尋的 bin
   let highlightedBin = null;
   let highlightEndTime = 0;
 
-  // 幾何參數
   const BIN_W = 1.10;
   const BIN_H = 1.40;
   const BIN_D = 1.20;
   const BAY_GAP_X = 0.20;
-  const ROW_EXTRA = 0.40; // row 與 row 之間額外距離（不含 aisle）
+  const ROW_EXTRA = 0.40;
 
   const COLORS = {
     wireNormal:    0x4b5563,
@@ -282,7 +267,7 @@
       metalness:0
     });
     const m = new THREE.Mesh(geo, mat);
-    m.visible = false; // 未佔用時不顯示
+    m.visible = false;
     return m;
   }
 
@@ -357,7 +342,6 @@
     fitCameraToObject(warehouseGroup);
     slotInfoEl.textContent = '已重建 3D 圖面。';
 
-    // 把目前邏輯資料套用回新的幾何
     applyLogicalSlotsToBins();
   }
 
@@ -421,11 +405,9 @@
     controls.update();
   }
 
-  // ===== Excel 日期處理 =====
   function excelToDate(value){
     if (value == null || value === '') return null;
     if (typeof value === 'number'){
-      // Excel serial：1900-01-00 為 0，實務常用 1899-12-30
       const base = new Date(Date.UTC(1899,11,30));
       const d = new Date(base.getTime() + value * 86400000);
       return d;
@@ -433,7 +415,6 @@
     if (typeof value === 'string'){
       const s = value.trim();
       if (!s) return null;
-      // 支援 20251014 / 2025-10-14 / 2025/10/14 等
       const m = s.match(/^(\d{4})[\/\-]?(\d{2})[\/\-]?(\d{2})$/);
       if (m){
         const y = parseInt(m[1],10);
@@ -459,7 +440,6 @@
     return 'ok';
   }
 
-  // ===== 讀 Excel → 更新 logicalSlots → 套用到 bins =====
   async function syncFromExcel(){
     try{
       const resp = await fetch(EXCEL_PATH + '?t=' + Date.now());
@@ -555,7 +535,6 @@
     }
   }
 
-  // ===== 匯出目前 bins 狀態 → 新的 rack_status.xlsx =====
   function exportToExcel(){
     if (bins.length === 0){
       alert('目前沒有任何儲位，請先 Rebuild。');
@@ -607,7 +586,6 @@
       '已匯出目前狀態為 rack_status.xlsx（請自行覆蓋 data 資料夾中的檔案）。';
   }
 
-  // ===== 顯示儲位資訊 =====
   function showBinInfo(bin){
     const rowLabel = rowIndexToLabel(bin.row);
     const bayNo    = bayIndexToNumber(bin.bay);
@@ -649,7 +627,6 @@
     slotInfoEl.innerHTML = html;
   }
 
-  // ===== 點擊 3D 堆高位，只顯示資訊，不改 Occupied =====
   function onPointerDown(e){
     const rect = renderer.domElement.getBoundingClientRect();
     const x = ((e.clientX-rect.left)/rect.width)*2 - 1;
@@ -659,19 +636,17 @@
     if (hit){
       const bin = hit.object.userData.bin;
       highlightedBin = bin;
-      highlightEndTime = clock.getElapsedTime() + 6; // 高亮 6 秒
+      highlightEndTime = clock.getElapsedTime() + 6;
       showBinInfo(bin);
     }
   }
   renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
-  // ===== 搜尋儲位：F-19-04 / F1904 等 =====
   function parseSlotCode(str){
     if (!str) return null;
     let s = String(str).trim().toUpperCase();
     if (!s) return null;
 
-    // 把非 A-Z0-9 都當分隔
     s = s.replace(/[^A-Z0-9]+/g, ' ');
     const parts = s.split(/\s+/).filter(Boolean);
 
@@ -738,7 +713,6 @@
     focusBin(bin);
   }
 
-  // ===== localStorage：儲位資訊 & 參數 =====
   function saveSlotsToStorage(){
     const arr = [];
     for (const slot of logicalSlots.values()){
@@ -797,16 +771,15 @@
     }
   }
 
-  // ===== 動畫迴圈：含及期跳動＋已過期劇烈晃動＋線框閃爍 =====
   renderer.setAnimationLoop(()=>{
     const t = clock.getElapsedTime();
 
     const ampNear   = 0.08;
     const speedNear = 4.0;
 
-    const ampExpPos   = 0.45; // x/z 擺動幅度
-    const ampExpY     = 0.40; // y 擺動
-    const speedExpPos = 15.0; // 速度
+    const ampExpPos   = 0.45;
+    const ampExpY     = 0.40;
+    const speedExpPos = 15.0;
 
     const nowT = t;
 
@@ -814,7 +787,6 @@
       const lineMat  = bin.line.material;
       const cargoMat = bin.cargo.material;
 
-      // 先回到基準位置
       bin.cargo.position.set(bin.baseX, bin.baseY, bin.baseZ);
 
       let wireColor  = COLORS.wireNormal;
@@ -823,14 +795,12 @@
 
       if (bin.occupied){
         if (bin.expStatus === 'near'){
-          // 及期：白箱 + 紅框 + 小幅上下跳
           wireColor  = COLORS.wireNear;
           cargoColor = COLORS.cargoNear;
           bin.cargo.position.y =
             bin.baseY + Math.sin(t * speedNear) * ampNear;
           opacity = 0.9;
         }else if (bin.expStatus === 'expired'){
-          // 已過期：紅箱 + 白框 + 劇烈晃動 + 線框閃爍
           wireColor  = COLORS.wireExpired;
           cargoColor = COLORS.cargoExpired;
 
@@ -843,18 +813,15 @@
           bin.cargo.position.y =
             bin.baseY + Math.sin(t * speedExpPos * 0.7 + phase) * ampExpY;
 
-          // 線框閃爍（改 opacity）
           const flash = 0.40 + 0.45 * (0.5 + 0.5 * Math.sin(t * 12 + phase));
           opacity = flash;
         }else{
-          // 一般有貨：正常顏色
           wireColor  = COLORS.wireNormal;
           cargoColor = COLORS.cargoNormal;
           opacity = 0.7;
         }
       }
 
-      // 搜尋 / 點選高亮：覆蓋線框顏色
       if (bin === highlightedBin && nowT < highlightEndTime){
         wireColor = COLORS.wireHighlight;
         opacity   = 1.0;
@@ -869,7 +836,6 @@
     renderer.render(scene, camera);
   });
 
-  // ===== 事件綁定 =====
   ui.rebuildBtn.addEventListener('click', rebuild);
   ui.randomBtn.addEventListener('click', randomFill);
   ui.syncExcelBtn.addEventListener('click', syncFromExcel);
@@ -886,12 +852,11 @@
     renderer.setSize(s.w,s.h);
   });
 
-  // ===== 初始化：先載入 localStorage，再 Rebuild，再套用 slots =====
   loadParamsFromStorage();
   loadSlotsFromStorage();
   loadImportTimeFromStorage();
-  rebuild();           // 建立幾何
-  applyLogicalSlotsToBins(); // 若有舊資料就套用
+  rebuild();          
+  applyLogicalSlotsToBins();
 </script>
 </body>
 </html>
