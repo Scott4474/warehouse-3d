@@ -1,0 +1,32 @@
+services:
+  # ===============================
+  # 1) FRONTEND — Static Website
+  # ===============================
+  - type: static
+    name: warehouse-3d-frontend
+    rootDir: frontend
+    buildCommand: ""
+    staticPublishPath: .
+    autoDeploy: true
+
+  # ===============================
+  # 2) NODE.JS WEBSOCKET SERVER
+  # ===============================
+  - type: web
+    name: warehouse-3d-websocket
+    rootDir: backend-node
+    env: node
+    buildCommand: "npm install"
+    startCommand: "node src/websocket/server.js"
+    autoDeploy: true
+
+  # ===============================
+  # 3) PYTHON FASTAPI (Excel API)
+  # ===============================
+  - type: web
+    name: warehouse-3d-python-api
+    rootDir: backend-python
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.api.main:app --host 0.0.0.0 --port 10000"
+    autoDeploy: true
