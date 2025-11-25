@@ -6,7 +6,6 @@
   <title>Warehouse 3D</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
-
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <script type="importmap">
@@ -34,29 +33,42 @@
 <div class="flex h-screen w-screen overflow-hidden">
 
   <div class="w-80 bg-gray-800 p-5 space-y-4 overflow-y-auto">
-
     <h1 class="text-2xl font-bold mb-2">Warehouse 3D</h1>
 
     <div>
-      <label for="rowsInput" class="block text-sm mb-1">Row 數</label>
+      <label class="block text-sm mb-1">Warehouse 切換</label>
+      <select id="warehouseSelect"
+              class="w-full bg-gray-700 p-2 rounded outline-none">
+        <option value="WH1">WH1</option>
+        <option value="WH2">WH2</option>
+        <option value="WH3">WH3</option>
+        <option value="WH5">WH5</option>
+        <option value="WH6">WH6</option>
+        <option value="WH7">WH7</option>
+        <option value="WH8">WH8</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm mb-1">Row 數</label>
       <input id="rowsInput" type="number" value="12" min="1"
              class="w-full bg-gray-700 p-2 rounded outline-none" />
     </div>
 
     <div>
-      <label for="baysInput" class="block text-sm mb-1">Bay 數</label>
+      <label class="block text-sm mb-1">Bay 數</label>
       <input id="baysInput" type="number" value="50" min="1"
              class="w-full bg-gray-700 p-2 rounded outline-none" />
     </div>
 
     <div>
-      <label for="levelsInput" class="block text-sm mb-1">Level 數</label>
+      <label class="block text-sm mb-1">Level 數</label>
       <input id="levelsInput" type="number" value="5" min="1"
              class="w-full bg-gray-700 p-2 rounded outline-none" />
     </div>
 
     <div>
-      <label for="aisleInput" class="block text-sm mb-1">Aisle（走道寬，公尺）</label>
+      <label class="block text-sm mb-1">Aisle（走道寬，公尺）</label>
       <input id="aisleInput" type="number" value="3.5" step="0.1" min="1"
              class="w-full bg-gray-700 p-2 rounded outline-none" />
     </div>
@@ -81,8 +93,8 @@
       Export Excel
     </button>
 
-    <div class="mt-4">
-      <label for="searchSlot" class="block text-sm mb-1">搜尋儲位（例如：F-19-04 或 F1904）</label>
+    <div>
+      <label class="block text-sm mb-1">搜尋儲位（例如：F-19-04 或 F1904）</label>
       <input id="searchSlot" type="text"
              class="w-full bg-gray-700 p-2 rounded outline-none"
              placeholder="例如 F-19-04 / F1904" />
@@ -93,13 +105,11 @@
     </div>
 
     <p class="text-xs text-gray-400 mt-4 leading-relaxed">
-      左鍵：點儲位看資訊（不改有無貨＋畫路徑）<br>
-      右鍵：平移。滾輪：縮放。<br><br>
-      Excel 位置：<span class="font-mono">/data/rack_status.xlsx</span><br>
-      欄位：Row / Bay / Level / Occupied / PN / 數量 / Batch / Expire Date / Manufacture Date<br><br>
-      及期邏輯：<br>
-      到期日 ≦ 今日 → <span class="text-red-400">紅箱＋白框＋劇烈晃動＋閃爍</span><br>
-      30 天內到期 → 白箱＋紅框＋小幅跳動
+      左鍵點儲位看資訊。右鍵平移。滾輪縮放。<br><br>
+      WebSocket：<span class="font-mono">/ws/{warehouse}</span><br>
+      API：<span class="font-mono">/api/{warehouse}/excel</span><br><br>
+      到期日 ≦ 今日 → 紅箱＋白框＋劇烈晃動<br>
+      30 天內 → 白箱＋紅框＋小幅跳動
     </p>
 
     <div id="importTime" class="text-xs text-gray-400">
@@ -110,7 +120,6 @@
          class="bg-gray-700 mt-3 p-3 rounded min-h-[120px] text-sm leading-relaxed">
       請點選儲位或匯入 Excel。
     </div>
-
   </div>
 
   <div id="viewport" class="flex-1"></div>
@@ -118,118 +127,220 @@
 </div>
 
 <script type="module">
-  import * as THREE from 'three';
-  import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-  const EXCEL_PATH = '/data/rack_status.xlsx';
+const API_BASE = "https://warehouse-3d-python-api.onrender.com";
+const WS_BASE = "wss://warehouse-3d-websocket.onrender.com";
 
-  const viewport    = document.getElementById('viewport');
-  const slotInfoEl  = document.getElementById('slotInfo');
-  const importTimeEl= document.getElementById('importTime');
+let currentWarehouse = "WH1";
+let ws = null;
 
-  const ui = {
-    rows:   document.getElementById('rowsInput'),
-    bays:   document.getElementById('baysInput'),
-    levels: document.getElementById('levelsInput'),
-    aisle:  document.getElementById('aisleInput'),
-    rebuildBtn:    document.getElementById('rebuild'),
-    randomBtn:     document.getElementById('random'),
-    syncExcelBtn:  document.getElementById('syncExcel'),
-    exportExcelBtn:document.getElementById('exportExcel'),
-    searchSlot:    document.getElementById('searchSlot'),
-    searchBtn:     document.getElementById('searchBtn')
-  };
+function connectWS() {
+    const url = `${WS_BASE}/ws/${currentWarehouse}`;
+    ws = new WebSocket(url);
 
-  const ROW_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const STORAGE_KEY_SLOTS = 'warehouse3d_slots_v1';
-  const STORAGE_KEY_IMPORT_TIME = 'warehouse3d_import_time_v1';
-  const STORAGE_KEY_PARAMS = 'warehouse3d_params_v1';
+    ws.onopen = () => {};
+    ws.onclose = () => {
+        setTimeout(connectWS, 5000);
+    };
+    ws.onerror = () => {};
+    ws.onmessage = (msg) => {
+        const data = JSON.parse(msg.data);
+        if (data.type === "update") {
+            logicalSlots.clear();
+            for (const slot of data.slots) {
+                const key = `${slot.row}_${slot.bay}_${slot.level}`;
+                logicalSlots.set(key, slot);
+            }
+            applyLogicalSlotsToBins();
+            slotInfoEl.textContent = `已套用 ${currentWarehouse} 最新 Excel 更新`;
+        }
+    };
+}
 
-  function rowIndexToLabel(i){
-    if (i >= 0 && i < ROW_LABELS.length) return ROW_LABELS[i];
-    return String(i);
-  }
-  function rowLabelToIndex(v){
-    if (v == null) return null;
-    if (typeof v === 'string'){
-      const s = v.trim().toUpperCase();
-      if (s.length === 1 && ROW_LABELS.includes(s)){
-        return ROW_LABELS.indexOf(s);
-      }
+connectWS();
+
+async function fetchExcelFromAPI() {
+    try {
+        const url = `${API_BASE}/api/${currentWarehouse}/excel`;
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            alert(`無法讀取 ${currentWarehouse} Excel`);
+            return null;
+        }
+        return await resp.arrayBuffer();
+    } catch (_) {
+        alert("讀取 Excel 時發生錯誤，Python API 可能未啟動");
+        return null;
     }
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  function bayIndexToNumber(i){ return i + 1; }
-  function levelIndexToNumber(i){ return i + 1; }
-  function pad2(n){ return String(n).padStart(2,'0'); }
-  function slotKey(r,b,l){ return `${r}_${b}_${l}`; }
+}
 
-  const renderer = new THREE.WebGLRenderer({ antialias:true });
-  function getSize(){
+async function syncFromExcelAPI() {
+    const buf = await fetchExcelFromAPI();
+    if (!buf) return;
+
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    const header = rows[0] || [];
+    const idxRow = header.indexOf("Row");
+    const idxBay = header.indexOf("Bay");
+    const idxLvl = header.indexOf("Level");
+    const idxOcc = header.indexOf("Occupied");
+    const idxPN = header.indexOf("PN");
+    const idxQty = header.indexOf("數量");
+    const idxBat = header.indexOf("Batch");
+    const idxExp = header.indexOf("Expire Date");
+    const idxMfg = header.indexOf("Manufacture Date");
+
+    logicalSlots.clear();
+
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row) continue;
+
+        const rIndex = rowLabelToIndex(row[idxRow]);
+        const bIndex = parseInt(row[idxBay]) - 1;
+        const lvIndex = parseInt(row[idxLvl]) - 1;
+
+        const occ = row[idxOcc] == 1;
+
+        const expDate = excelToDate(row[idxExp]);
+        const expStatus = classifyExpiry(expDate);
+
+        const meta = {
+            "PN": row[idxPN] ?? "",
+            "數量": row[idxQty] ?? "",
+            "Batch": row[idxBat] ?? "",
+            "Expire Date": row[idxExp] ?? "",
+            "Manufacture Date": row[idxMfg] ?? ""
+        };
+
+        const key = `${rIndex}_${bIndex}_${lvIndex}`;
+
+        logicalSlots.set(key, {
+            row: rIndex,
+            bay: bIndex,
+            level: lvIndex,
+            occupied: occ,
+            meta,
+            expStatus,
+            expDateISO: expDate ? expDate.toISOString().slice(0, 10) : null
+        });
+    }
+
+    applyLogicalSlotsToBins();
+
+    const t = new Date().toLocaleString();
+    importTimeEl.textContent = `最後匯入時間（${currentWarehouse}）：${t}`;
+    slotInfoEl.textContent = `Excel 已同步：${currentWarehouse}`;
+}
+
+const warehouseSelect = document.getElementById("warehouseSelect");
+
+warehouseSelect.addEventListener("change", async () => {
+    currentWarehouse = warehouseSelect.value;
+    try { ws.close(); } catch (_) {}
+    setTimeout(connectWS, 300);
+    await syncFromExcelAPI();
+    slotInfoEl.textContent = `已切換到 ${currentWarehouse}`;
+});
+const viewport = document.getElementById('viewport');
+const slotInfoEl = document.getElementById('slotInfo');
+const importTimeEl = document.getElementById('importTime');
+
+const ui = {
+    rows: document.getElementById('rowsInput'),
+    bays: document.getElementById('baysInput'),
+    levels: document.getElementById('levelsInput'),
+    aisle: document.getElementById('aisleInput'),
+    rebuildBtn: document.getElementById('rebuild'),
+    randomBtn: document.getElementById('random'),
+    syncExcelBtn: document.getElementById('syncExcel'),
+    exportExcelBtn: document.getElementById('exportExcel'),
+    searchSlot: document.getElementById('searchSlot'),
+    searchBtn: document.getElementById('searchBtn')
+};
+
+const ROW_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function rowIndexToLabel(i){ return ROW_LABELS[i] || String(i); }
+function rowLabelToIndex(v){
+    const s = String(v).trim().toUpperCase();
+    if (s.length === 1 && ROW_LABELS.includes(s)) return ROW_LABELS.indexOf(s);
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+}
+function bayIndexToNumber(i){ return i + 1; }
+function levelIndexToNumber(i){ return i + 1; }
+function pad2(n){ return String(n).padStart(2,'0'); }
+function slotKey(r,b,l){ return `${r}_${b}_${l}`; }
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+function getSize(){
     const w = viewport.clientWidth || window.innerWidth;
     const h = viewport.clientHeight || window.innerHeight;
     return { w, h };
-  }
-  const size0 = getSize();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(size0.w, size0.h);
-  viewport.appendChild(renderer.domElement);
+}
+const size0 = getSize();
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(size0.w, size0.h);
+viewport.appendChild(renderer.domElement);
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x020617);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020617);
 
-  const camera = new THREE.PerspectiveCamera(50, size0.w/size0.h, 0.1, 4000);
-  camera.position.set(30, 25, 40);
+const camera = new THREE.PerspectiveCamera(50, size0.w/size0.h, 0.1, 4000);
+camera.position.set(30, 25, 40);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.target.set(0, 4, 0);
-  controls.update();
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 4, 0);
+controls.update();
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(-30, 40, 20);
-  scene.add(dir);
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(-30, 40, 20);
+scene.add(dir);
 
-  const gridBase = new THREE.GridHelper(600, 60, 0x22c55e, 0x1e293b);
-  gridBase.position.y = 0;
-  scene.add(gridBase);
+const gridBase = new THREE.GridHelper(600, 60, 0x22c55e, 0x1e293b);
+gridBase.position.y = 0;
+scene.add(gridBase);
 
-  const gridRoute = new THREE.GridHelper(200, 40, 0x0ea5e9, 0x0f172a);
-  gridRoute.position.y = 0.02;
-  gridRoute.material.transparent = true;
-  gridRoute.material.opacity = 0.35;
-  scene.add(gridRoute);
+const gridRoute = new THREE.GridHelper(200, 40, 0x0ea5e9, 0x0f172a);
+gridRoute.position.y = 0.02;
+gridRoute.material.transparent = true;
+gridRoute.material.opacity = 0.35;
+scene.add(gridRoute);
 
-  const originCube = new THREE.Mesh(
+const originCube = new THREE.Mesh(
     new THREE.BoxGeometry(0.6,0.6,0.6),
     new THREE.MeshStandardMaterial({ color:0xeab308 })
-  );
-  originCube.position.set(0,0.3,0);
-  scene.add(originCube);
+);
+originCube.position.set(0,0.3,0);
+scene.add(originCube);
 
-  let warehouseGroup = new THREE.Group();
-  scene.add(warehouseGroup);
+let warehouseGroup = new THREE.Group();
+scene.add(warehouseGroup);
 
-  const raycaster = new THREE.Raycaster();
-  const clock = new THREE.Clock();
+const raycaster = new THREE.Raycaster();
+const clock = new THREE.Clock();
 
-  const clickTargets = [];
-  const bins = [];
+const clickTargets = [];
+const bins = [];
+const logicalSlots = new Map();
 
-  const logicalSlots = new Map();
+let highlightedBin = null;
+let highlightEndTime = 0;
 
-  let highlightedBin = null;
-  let highlightEndTime = 0;
+const BIN_W = 1.10;
+const BIN_H = 1.40;
+const BIN_D = 1.20;
+const BAY_GAP_X = 0.20;
+const ROW_EXTRA = 0.40;
 
-  const BIN_W = 1.10;
-  const BIN_H = 1.40;
-  const BIN_D = 1.20;
-  const BAY_GAP_X = 0.20;
-  const ROW_EXTRA = 0.40;
-
-  const COLORS = {
+const COLORS = {
     wireNormal:    0x4b5563,
     cargoNormal:   0xc49a6c,
     wireNear:      0xef4444,
@@ -237,62 +348,48 @@
     wireExpired:   0xffffff,
     cargoExpired:  0xef4444,
     wireHighlight: 0x22c55e
-  };
+};
 
-  function makeWireBox(w,h,d){
+function makeWireBox(w,h,d){
     const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(w,h,d));
-    const mat = new THREE.LineBasicMaterial({
-      color: COLORS.wireNormal,
-      transparent:true,
-      opacity:0.5
-    });
+    const mat = new THREE.LineBasicMaterial({ color: COLORS.wireNormal, transparent:true, opacity:0.5 });
     return new THREE.LineSegments(geo, mat);
-  }
+}
 
-  function makeHitBox(w,h,d){
+function makeHitBox(w,h,d){
     const geo = new THREE.BoxGeometry(w,h,d);
-    const mat = new THREE.MeshBasicMaterial({
-      transparent:true,
-      opacity:0.0,
-      depthWrite:false
-    });
+    const mat = new THREE.MeshBasicMaterial({ transparent:true, opacity:0.0, depthWrite:false });
     return new THREE.Mesh(geo, mat);
-  }
+}
 
-  function makeCargo(w,h,d){
+function makeCargo(w,h,d){
     const geo = new THREE.BoxGeometry(w*0.94, Math.min(h*0.9, 1.2), d*0.94);
-    const mat = new THREE.MeshStandardMaterial({
-      color: COLORS.cargoNormal,
-      roughness:0.85,
-      metalness:0
-    });
+    const mat = new THREE.MeshStandardMaterial({ color: COLORS.cargoNormal, roughness:0.85, metalness:0 });
     const m = new THREE.Mesh(geo, mat);
     m.visible = false;
     return m;
-  }
+}
 
-  function clearWarehouse(){
+function clearWarehouse(){
     scene.remove(warehouseGroup);
     warehouseGroup.traverse(o=>{
-      if (o.geometry) o.geometry.dispose();
-      if (o.material){
-        if (Array.isArray(o.material)) o.material.forEach(m=>m.dispose());
-        else o.material.dispose();
-      }
+        if (o.geometry) o.geometry.dispose();
+        if (o.material){
+            if (Array.isArray(o.material)) o.material.forEach(m=>m.dispose());
+            else o.material.dispose();
+        }
     });
     warehouseGroup = new THREE.Group();
     scene.add(warehouseGroup);
     clickTargets.length = 0;
     bins.length = 0;
-  }
+}
 
-  function rebuild(){
+function rebuild(){
     const rows   = Math.max(1, parseInt(ui.rows.value)   || 1);
     const bays   = Math.max(1, parseInt(ui.bays.value)   || 1);
     const levels = Math.max(1, parseInt(ui.levels.value) || 1);
     const aisle  = Math.max(1, parseFloat(ui.aisle.value)|| 1);
-
-    saveParamsToStorage();
 
     clearWarehouse();
 
@@ -306,91 +403,90 @@
     const z0 = -totalD/2 + BIN_D/2;
 
     for (let r=0; r<rows; r++){
-      const z = z0 + r*rowSpacing;
-      for (let b=0; b<bays; b++){
-        const x = x0 + b*baySpacing;
-        for (let lv=0; lv<levels; lv++){
-          const y = 0.05 + lv*BIN_H + BIN_H/2;
+        const z = z0 + r*rowSpacing;
+        for (let b=0; b<bays; b++){
+            const x = x0 + b*baySpacing;
+            for (let lv=0; lv<levels; lv++){
+                const y = 0.05 + lv*BIN_H + BIN_H/2;
 
-          const wire  = makeWireBox(BIN_W,BIN_H,BIN_D); wire.position.set(x,y,z);
-          const hit   = makeHitBox(BIN_W,BIN_H,BIN_D);  hit.position.set(x,y,z);
-          const cargo = makeCargo(BIN_W,BIN_H,BIN_D);   cargo.position.set(x,y,z);
+                const wire  = makeWireBox(BIN_W,BIN_H,BIN_D); wire.position.set(x,y,z);
+                const hit   = makeHitBox(BIN_W,BIN_H,BIN_D);  hit.position.set(x,y,z);
+                const cargo = makeCargo(BIN_W,BIN_H,BIN_D);   cargo.position.set(x,y,z);
 
-          warehouseGroup.add(wire, hit, cargo);
+                warehouseGroup.add(wire, hit, cargo);
 
-          const rec = {
-            row: r,
-            bay: b,
-            level: lv,
-            line: wire,
-            hit,
-            cargo,
-            occupied: false,
-            meta: null,
-            expStatus: 'ok',
-            baseX: x,
-            baseY: y,
-            baseZ: z
-          };
-          bins.push(rec);
-          hit.userData.bin = rec;
-          clickTargets.push(hit);
+                const rec = {
+                    row: r,
+                    bay: b,
+                    level: lv,
+                    line: wire,
+                    hit,
+                    cargo,
+                    occupied: false,
+                    meta: null,
+                    expStatus: 'ok',
+                    baseX: x,
+                    baseY: y,
+                    baseZ: z
+                };
+                bins.push(rec);
+                hit.userData.bin = rec;
+                clickTargets.push(hit);
+            }
         }
-      }
     }
 
     fitCameraToObject(warehouseGroup);
     slotInfoEl.textContent = '已重建 3D 圖面。';
 
     applyLogicalSlotsToBins();
-  }
+}
 
-  function setOccupied(bin, occ){
+function setOccupied(bin, occ){
     bin.occupied = !!occ;
     bin.cargo.visible = !!occ;
-  }
+}
 
-  function applyLogicalSlotsToBins(){
+function applyLogicalSlotsToBins(){
     for (const bin of bins){
-      const key = slotKey(bin.row, bin.bay, bin.level);
-      const slot = logicalSlots.get(key);
-      if (slot){
-        bin.meta      = slot.meta || null;
-        bin.expStatus = slot.expStatus || 'ok';
-        setOccupied(bin, slot.occupied);
-      }else{
-        bin.meta      = null;
-        bin.expStatus = 'ok';
-        setOccupied(bin, false);
-      }
+        const key = slotKey(bin.row, bin.bay, bin.level);
+        const slot = logicalSlots.get(key);
+        if (slot){
+            bin.meta      = slot.meta || null;
+            bin.expStatus = slot.expStatus || 'ok';
+            setOccupied(bin, slot.occupied);
+        }else{
+            bin.meta      = null;
+            bin.expStatus = 'ok';
+            setOccupied(bin, false);
+        }
     }
-  }
+}
 
-  function randomFill(){
+function randomFill(){
     logicalSlots.clear();
     for (const bin of bins){
-      const occ = Math.random() < 0.35;
-      setOccupied(bin, occ);
-      if (occ){
-        bin.meta = null;
-        bin.expStatus = 'ok';
-        const key = slotKey(bin.row, bin.bay, bin.level);
-        logicalSlots.set(key, {
-          row: bin.row,
-          bay: bin.bay,
-          level: bin.level,
-          occupied: true,
-          meta: null,
-          expStatus: 'ok',
-          expDateISO: null
-        });
-      }
+        const occ = Math.random() < 0.35;
+        setOccupied(bin, occ);
+        if (occ){
+            bin.meta = null;
+            bin.expStatus = 'ok';
+            const key = slotKey(bin.row, bin.bay, bin.level);
+            logicalSlots.set(key, {
+                row: bin.row,
+                bay: bin.bay,
+                level: bin.level,
+                occupied: true,
+                meta: null,
+                expStatus: 'ok',
+                expDateISO: null
+            });
+        }
     }
-    saveSlotsToStorage();
     slotInfoEl.textContent = 'Random Fill 完成（示意用，不含實際貨物資訊）。';
-  }
+}
 
-  function fitCameraToObject(object){
+function fitCameraToObject(object){
     const box = new THREE.Box3().setFromObject(object);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -403,246 +499,168 @@
                         center.z + dist*0.9);
     controls.target.copy(center);
     controls.update();
-  }
+}
 
-  function excelToDate(value){
+renderer.setAnimationLoop(()=>{
+    const t = clock.getElapsedTime();
+    const ampNear   = 0.08;
+    const speedNear = 4.0;
+    const ampExpPos   = 0.45;
+    const ampExpY     = 0.40;
+    const speedExpPos = 15.0;
+    const nowT = t;
+
+    for (const bin of bins){
+        const lineMat  = bin.line.material;
+        const cargoMat = bin.cargo.material;
+
+        bin.cargo.position.set(bin.baseX, bin.baseY, bin.baseZ);
+
+        let wireColor  = COLORS.wireNormal;
+        let cargoColor = COLORS.cargoNormal;
+        let opacity    = 0.45;
+
+        if (bin.occupied){
+            if (bin.expStatus === 'near'){
+                wireColor  = COLORS.wireNear;
+                cargoColor = COLORS.cargoNear;
+                bin.cargo.position.y =
+                    bin.baseY + Math.sin(t * speedNear) * ampNear;
+                opacity = 0.9;
+            }else if (bin.expStatus === 'expired'){
+                wireColor  = COLORS.wireExpired;
+                cargoColor = COLORS.cargoExpired;
+
+                const phase = (bin.row * 7 + bin.bay * 13 + bin.level * 17);
+
+                bin.cargo.position.x =
+                    bin.baseX + Math.sin(t * speedExpPos + phase) * ampExpPos;
+                bin.cargo.position.z =
+                    bin.baseZ + Math.cos(t * speedExpPos + phase) * ampExpPos;
+                bin.cargo.position.y =
+                    bin.baseY + Math.sin(t * speedExpPos * 0.7 + phase) * ampExpY;
+
+                const flash = 0.40 + 0.45 * (0.5 + 0.5 * Math.sin(t * 12 + phase));
+                opacity = flash;
+            }else{
+                wireColor  = COLORS.wireNormal;
+                cargoColor = COLORS.cargoNormal;
+                opacity = 0.7;
+            }
+        }
+
+        if (bin === highlightedBin && nowT < highlightEndTime){
+            wireColor = COLORS.wireHighlight;
+            opacity   = 1.0;
+        }
+
+        lineMat.color.setHex(wireColor);
+        lineMat.opacity = opacity;
+        cargoMat.color.setHex(cargoColor);
+    }
+
+    controls.update();
+    renderer.render(scene, camera);
+});
+
+function excelToDate(value){
     if (value == null || value === '') return null;
     if (typeof value === 'number'){
-      const base = new Date(Date.UTC(1899,11,30));
-      const d = new Date(base.getTime() + value * 86400000);
-      return d;
+        const base = new Date(Date.UTC(1899,11,30));
+        const d = new Date(base.getTime() + value * 86400000);
+        return d;
     }
     if (typeof value === 'string'){
-      const s = value.trim();
-      if (!s) return null;
-      const m = s.match(/^(\d{4})[\/\-]?(\d{2})[\/\-]?(\d{2})$/);
-      if (m){
-        const y = parseInt(m[1],10);
-        const mo= parseInt(m[2],10)-1;
-        const da= parseInt(m[3],10);
-        return new Date(y,mo,da);
-      }
-      const d = new Date(s);
-      if (!isNaN(d.getTime())) return d;
+        const s = value.trim();
+        if (!s) return null;
+        const m = s.match(/^(\d{4})[\/\-]?(\d{2})[\/\-]?(\d{2})$/);
+        if (m){
+            const y = parseInt(m[1],10);
+            const mo= parseInt(m[2],10)-1;
+            const da= parseInt(m[3],10);
+            return new Date(y,mo,da);
+        }
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d;
     }
     return null;
-  }
+}
 
-  function classifyExpiry(expDate){
+function classifyExpiry(expDate){
     if (!expDate) return 'ok';
     const today = new Date();
     const baseToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const baseExp   = new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate());
     const diffDays = (baseExp - baseToday)/86400000;
-
     if (diffDays < 0) return 'expired';
     if (diffDays <= 30) return 'near';
     return 'ok';
-  }
+}
 
-  async function syncFromExcel(){
-    try{
-      const resp = await fetch(EXCEL_PATH + '?t=' + Date.now());
-      console.log('fetch Excel status =', resp.status, resp.statusText);
-      if (!resp.ok){
-        alert('找不到 ' + EXCEL_PATH + '，請確認後端 app.py 是否正在執行。');
-        return;
-      }
+async function syncFromExcelAPI(){
+    const buf = await fetchExcelFromAPI();
+    if (!buf) return;
 
-      const buf = await resp.arrayBuffer();
-      const wb  = XLSX.read(buf, { type:'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header:1 });
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-      const header = rows[0] || [];
-      const idxRow = header.indexOf('Row');
-      const idxBay = header.indexOf('Bay');
-      const idxLvl = header.indexOf('Level');
-      const idxOcc = header.indexOf('Occupied');
-      const idxPN  = header.indexOf('PN');
-      const idxQty = header.indexOf('數量');
-      const idxBat = header.indexOf('Batch');
-      const idxExp = header.indexOf('Expire Date');
-      const idxMfg = header.indexOf('Manufacture Date');
+    const header = rows[0] || [];
+    const idxRow = header.indexOf("Row");
+    const idxBay = header.indexOf("Bay");
+    const idxLvl = header.indexOf("Level");
+    const idxOcc = header.indexOf("Occupied");
+    const idxPN = header.indexOf("PN");
+    const idxQty = header.indexOf("數量");
+    const idxBat = header.indexOf("Batch");
+    const idxExp = header.indexOf("Expire Date");
+    const idxMfg = header.indexOf("Manufacture Date");
 
-      if (idxRow === -1 || idxBay === -1 || idxLvl === -1 || idxOcc === -1){
-        alert('Excel 第一列必須至少包含：Row / Bay / Level / Occupied');
-        return;
-      }
+    logicalSlots.clear();
 
-      logicalSlots.clear();
-
-      for (let i=1; i<rows.length; i++){
+    for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
-        if (!row || row.length === 0) continue;
+        if (!row) continue;
 
-        const rv = row[idxRow];
-        const rIndex = rowLabelToIndex(rv);
-        if (rIndex == null || !Number.isFinite(rIndex)) continue;
+        const rIndex = rowLabelToIndex(row[idxRow]);
+        const bIndex = parseInt(row[idxBay]) - 1;
+        const lvIndex = parseInt(row[idxLvl]) - 1;
 
-        let bv = row[idxBay];
-        if (bv == null || bv === '') continue;
-        let bNum = parseInt(String(bv).trim(), 10);
-        if (!Number.isFinite(bNum)) continue;
-        const bIndex = bNum - 1;
+        const occ = row[idxOcc] == 1;
 
-        let lvv = row[idxLvl];
-        if (lvv == null || lvv === '') continue;
-        let lNum = parseInt(String(lvv).trim(), 10);
-        if (!Number.isFinite(lNum)) continue;
-        const lvIndex = lNum - 1;
-
-        const occRaw = row[idxOcc];
-        const occ = (occRaw === 1 || occRaw === '1' || String(occRaw).trim() === '1');
-
-        const expRaw = idxExp >= 0 ? row[idxExp] : null;
-        const expDate = excelToDate(expRaw);
+        const expDate = excelToDate(row[idxExp]);
         const expStatus = classifyExpiry(expDate);
 
         const meta = {
-          'PN':  idxPN  >= 0 ? row[idxPN]  : '',
-          '數量': idxQty >= 0 ? row[idxQty] : '',
-          'Batch':idxBat >= 0 ? row[idxBat] : '',
-          'Expire Date': expRaw ?? '',
-          'Manufacture Date': idxMfg >= 0 ? row[idxMfg] : ''
+            "PN": row[idxPN] ?? "",
+            "數量": row[idxQty] ?? "",
+            "Batch": row[idxBat] ?? "",
+            "Expire Date": row[idxExp] ?? "",
+            "Manufacture Date": row[idxMfg] ?? ""
         };
 
-        const key = slotKey(rIndex, bIndex, lvIndex);
+        const key = `${rIndex}_${bIndex}_${lvIndex}`;
+
         logicalSlots.set(key, {
-          row: rIndex,
-          bay: bIndex,
-          level: lvIndex,
-          occupied: occ,
-          meta,
-          expStatus,
-          expDateISO: expDate ? expDate.toISOString().slice(0,10) : null
+            row: rIndex,
+            bay: bIndex,
+            level: lvIndex,
+            occupied: occ,
+            meta,
+            expStatus,
+            expDateISO: expDate ? expDate.toISOString().slice(0, 10) : null
         });
-      }
-
-      applyLogicalSlotsToBins();
-      saveSlotsToStorage();
-
-      const now = new Date();
-      const timeText = now.toLocaleString();
-      importTimeEl.textContent = '最後匯入時間：' + timeText;
-      localStorage.setItem(STORAGE_KEY_IMPORT_TIME, timeText);
-
-      slotInfoEl.textContent = '已從 Excel 同步 Occupied 與貨物資訊。';
-
-    }catch(err){
-      console.error(err);
-      alert('讀取 Excel 時發生錯誤，請查看 Console。');
-    }
-  }
-
-  function exportToExcel(){
-    if (bins.length === 0){
-      alert('目前沒有任何儲位，請先 Rebuild。');
-      return;
     }
 
-    const sorted = [...bins].sort((a,b)=>{
-      if (a.row !== b.row) return a.row - b.row;
-      if (a.bay !== b.bay) return a.bay - b.bay;
-      return a.level - b.level;
-    });
+    applyLogicalSlotsToBins();
 
-    const data = [];
-    data.push(['Row','Bay','Level','Occupied','PN','數量','Batch','Expire Date','Manufacture Date']);
+    const t = new Date().toLocaleString();
+    importTimeEl.textContent = `最後匯入時間（${currentWarehouse}）：${t}`;
 
-    for (const bin of sorted){
-      const rowLabel = rowIndexToLabel(bin.row);
-      const bayStr   = pad2(bayIndexToNumber(bin.bay));
-      const lvlStr   = pad2(levelIndexToNumber(bin.level));
-      const occ      = bin.occupied ? 1 : 0;
-      const meta = bin.meta || {};
-      const pn   = meta['PN'] ?? '';
-      const qty  = meta['數量'] ?? '';
-      const bat  = meta['Batch'] ?? '';
-      const exp  = meta['Expire Date'] ?? '';
-      const mfg  = meta['Manufacture Date'] ?? '';
+    slotInfoEl.textContent = `📥 Excel 已同步：${currentWarehouse}`;
+}
 
-      data.push([rowLabel, bayStr, lvlStr, occ, pn, qty, bat, exp, mfg]);
-    }
-
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-
-    const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-    const blob = new Blob([wbout],
-      { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'rack_status.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    slotInfoEl.textContent =
-      '已匯出目前狀態為 rack_status.xlsx（請自行覆蓋 data 資料夾中的檔案）。';
-  }
-
-  function showBinInfo(bin){
-    const rowLabel = rowIndexToLabel(bin.row);
-    const bayNo    = bayIndexToNumber(bin.bay);
-    const lvlNo    = levelIndexToNumber(bin.level);
-    const bayStr   = pad2(bayNo);
-    const lvlStr   = pad2(lvlNo);
-
-    let html = `儲位：Row <b>${rowLabel}</b>, Bay <b>${bayStr}</b>, Level <b>${lvlStr}</b><br>`;
-
-    if (!bin.occupied){
-      html += '狀態：<span class="text-emerald-300 font-semibold">空位</span>';
-    }else{
-      let statusText = '有貨';
-      if (bin.expStatus === 'near'){
-        statusText = '<span class="text-amber-300 font-semibold">及期（30 天內到期）</span>';
-      }else if (bin.expStatus === 'expired'){
-        statusText = '<span class="text-red-400 font-semibold">已過期</span>';
-      }else{
-        statusText = '<span class="text-sky-300 font-semibold">正常</span>';
-      }
-
-      html += '狀態：' + statusText;
-
-      const meta = bin.meta || {};
-      const pn   = meta['PN'] ?? '';
-      const qty  = meta['數量'] ?? '';
-      const bat  = meta['Batch'] ?? '';
-      const exp  = meta['Expire Date'] ?? '';
-      const mfg  = meta['Manufacture Date'] ?? '';
-
-      html += '<br><br>--- 貨物資訊 ---';
-      if (pn)  html += `<br>PN：${pn}`;
-      if (qty) html += `<br>數量：${qty}`;
-      if (bat) html += `<br>Batch：${bat}`;
-      if (exp) html += `<br>Expire Date：${exp}`;
-      if (mfg) html += `<br>Manufacture Date：${mfg}`;
-    }
-
-    slotInfoEl.innerHTML = html;
-  }
-
-  function onPointerDown(e){
-    const rect = renderer.domElement.getBoundingClientRect();
-    const x = ((e.clientX-rect.left)/rect.width)*2 - 1;
-    const y = -((e.clientY-rect.top)/rect.height)*2 + 1;
-    raycaster.setFromCamera({x,y}, camera);
-    const hit = raycaster.intersectObjects(clickTargets, false)[0];
-    if (hit){
-      const bin = hit.object.userData.bin;
-      highlightedBin = bin;
-      highlightEndTime = clock.getElapsedTime() + 6;
-      showBinInfo(bin);
-    }
-  }
-  renderer.domElement.addEventListener('pointerdown', onPointerDown);
-
-  function parseSlotCode(str){
+function parseSlotCode(str){
     if (!str) return null;
     let s = String(str).trim().toUpperCase();
     if (!s) return null;
@@ -652,18 +670,18 @@
 
     let rowLabel, bayStr, lvlStr;
     if (parts.length === 3){
-      [rowLabel, bayStr, lvlStr] = parts;
+        [rowLabel, bayStr, lvlStr] = parts;
     }else if (parts.length === 1){
-      const p = parts[0];
-      let m =
-        p.match(/^([A-Z]+)(\d{2})(\d{2})$/) ||
-        p.match(/^([A-Z]+)(\d)(\d)$/);
-      if (!m) return null;
-      rowLabel = m[1];
-      bayStr   = m[2];
-      lvlStr   = m[3];
+        const p = parts[0];
+        let m =
+          p.match(/^([A-Z]+)(\d{2})(\d{2})$/) ||
+          p.match(/^([A-Z]+)(\d)(\d)$/);
+        if (!m) return null;
+        rowLabel = m[1];
+        bayStr   = m[2];
+        lvlStr   = m[3];
     }else{
-      return null;
+        return null;
     }
 
     const rIndex = rowLabelToIndex(rowLabel);
@@ -674,104 +692,116 @@
     if (!Number.isFinite(bayNum) || !Number.isFinite(lvlNum)) return null;
 
     return {
-      rIndex,
-      bIndex: bayNum - 1,
-      lvIndex: lvlNum - 1
+        rIndex,
+        bIndex: bayNum - 1,
+        lvIndex: lvlNum - 1
     };
-  }
+}
 
-  function focusBin(bin){
+function focusBin(bin){
     if (!bin) return;
+
     const target = new THREE.Vector3();
     bin.hit.getWorldPosition(target);
+
     const dist = 6;
-    camera.position.set(target.x + dist,
-                        target.y + dist,
-                        target.z + dist);
+    camera.position.set(
+        target.x + dist,
+        target.y + dist,
+        target.z + dist
+    );
+
     controls.target.copy(target);
     controls.update();
+
     highlightedBin = bin;
     highlightEndTime = clock.getElapsedTime() + 8;
-    showBinInfo(bin);
-  }
 
-  function handleSearch(){
+    showBinInfo(bin);
+}
+
+function handleSearch(){
     const code = ui.searchSlot.value;
     const parsed = parseSlotCode(code);
     if (!parsed){
-      alert('請輸入類似：F-19-04 或 F1904 的格式。');
-      return;
+        alert('請輸入類似：F-19-04 或 F1904 的格式。');
+        return;
     }
     const { rIndex, bIndex, lvIndex } = parsed;
+
     const bin = bins.find(
       x => x.row === rIndex && x.bay === bIndex && x.level === lvIndex
     );
     if (!bin){
-      alert('找不到對應的儲位（可能超出目前 Row / Bay / Level 範圍）。');
-      return;
+        alert('找不到對應的儲位（可能超出目前 Row / Bay / Level 範圍）。');
+        return;
     }
+
     focusBin(bin);
-  }
+}
 
-  function saveSlotsToStorage(){
-    const arr = [];
-    for (const slot of logicalSlots.values()){
-      arr.push(slot);
+function showBinInfo(bin){
+    const rowLabel = rowIndexToLabel(bin.row);
+    const bayNo    = bayIndexToNumber(bin.bay);
+    const lvlNo    = levelIndexToNumber(bin.level);
+    const bayStr   = pad2(bayNo);
+    const lvlStr   = pad2(lvlNo);
+
+    let html = `儲位：Row <b>${rowLabel}</b>, Bay <b>${bayStr}</b>, Level <b>${lvlStr}</b><br>`;
+
+    if (!bin.occupied){
+        html += '狀態：<span class="text-emerald-300 font-semibold">空位</span>';
+    }else{
+        let statusText = '有貨';
+        if (bin.expStatus === 'near'){
+            statusText = '<span class="text-amber-300 font-semibold">及期（30 天內到期）</span>';
+        }else if (bin.expStatus === 'expired'){
+            statusText = '<span class="text-red-400 font-semibold">已過期</span>';
+        }else{
+            statusText = '<span class="text-sky-300 font-semibold">正常</span>';
+        }
+
+        html += '狀態：' + statusText;
+
+        const meta = bin.meta || {};
+        const pn   = meta['PN'] ?? '';
+        const qty  = meta['數量'] ?? '';
+        const bat  = meta['Batch'] ?? '';
+        const exp  = meta['Expire Date'] ?? '';
+        const mfg  = meta['Manufacture Date'] ?? '';
+
+        html += '<br><br>--- 貨物資訊 ---';
+        if (pn)  html += `<br>PN：${pn}`;
+        if (qty) html += `<br>數量：${qty}`;
+        if (bat) html += `<br>Batch：${bat}`;
+        if (exp) html += `<br>Expire Date：${exp}`;
+        if (mfg) html += `<br>Manufacture Date：${mfg}`;
     }
-    try{
-      localStorage.setItem(STORAGE_KEY_SLOTS, JSON.stringify(arr));
-    }catch(e){
-      console.warn('儲存 slots 到 localStorage 失敗：', e);
+
+    slotInfoEl.innerHTML = html;
+}
+
+renderer.domElement.addEventListener('pointerdown', (e)=>{
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = ((e.clientX-rect.left)/rect.width)*2 - 1;
+    const y = -((e.clientY-rect.top)/rect.height)*2 + 1;
+    raycaster.setFromCamera({x,y}, camera);
+
+    const hit = raycaster.intersectObjects(clickTargets, false)[0];
+    if (hit){
+        const bin = hit.object.userData.bin;
+        highlightedBin = bin;
+        highlightEndTime = clock.getElapsedTime() + 6;
+        showBinInfo(bin);
     }
-  }
+});
 
-  function loadSlotsFromStorage(){
-    const text = localStorage.getItem(STORAGE_KEY_SLOTS);
-    if (!text) return;
-    try{
-      const arr = JSON.parse(text);
-      logicalSlots.clear();
-      for (const s of arr){
-        const key = slotKey(s.row, s.bay, s.level);
-        logicalSlots.set(key, s);
-      }
-    }catch(e){
-      console.warn('讀取 slots localStorage 失敗：', e);
-    }
-  }
+ui.searchBtn.addEventListener('click', handleSearch);
+ui.searchSlot.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') handleSearch();
+});
 
-  function saveParamsToStorage(){
-    const obj = {
-      rows: ui.rows.value,
-      bays: ui.bays.value,
-      levels: ui.levels.value,
-      aisle: ui.aisle.value
-    };
-    try{
-      localStorage.setItem(STORAGE_KEY_PARAMS, JSON.stringify(obj));
-    }catch(e){}
-  }
-
-  function loadParamsFromStorage(){
-    const text = localStorage.getItem(STORAGE_KEY_PARAMS);
-    if (!text) return;
-    try{
-      const obj = JSON.parse(text);
-      if (obj.rows)   ui.rows.value   = obj.rows;
-      if (obj.bays)   ui.bays.value   = obj.bays;
-      if (obj.levels) ui.levels.value = obj.levels;
-      if (obj.aisle)  ui.aisle.value  = obj.aisle;
-    }catch(e){}
-  }
-
-  function loadImportTimeFromStorage(){
-    const t = localStorage.getItem(STORAGE_KEY_IMPORT_TIME);
-    if (t){
-      importTimeEl.textContent = '最後匯入時間：' + t;
-    }
-  }
-
-  renderer.setAnimationLoop(()=>{
+renderer.setAnimationLoop(() => {
     const t = clock.getElapsedTime();
 
     const ampNear   = 0.08;
@@ -783,80 +813,85 @@
 
     const nowT = t;
 
-    for (const bin of bins){
-      const lineMat  = bin.line.material;
-      const cargoMat = bin.cargo.material;
+    for (const bin of bins) {
+        const lineMat  = bin.line.material;
+        const cargoMat = bin.cargo.material;
 
-      bin.cargo.position.set(bin.baseX, bin.baseY, bin.baseZ);
+        bin.cargo.position.set(bin.baseX, bin.baseY, bin.baseZ);
 
-      let wireColor  = COLORS.wireNormal;
-      let cargoColor = COLORS.cargoNormal;
-      let opacity    = 0.45;
+        let wireColor  = COLORS.wireNormal;
+        let cargoColor = COLORS.cargoNormal;
+        let opacity    = 0.45;
 
-      if (bin.occupied){
-        if (bin.expStatus === 'near'){
-          wireColor  = COLORS.wireNear;
-          cargoColor = COLORS.cargoNear;
-          bin.cargo.position.y =
-            bin.baseY + Math.sin(t * speedNear) * ampNear;
-          opacity = 0.9;
-        }else if (bin.expStatus === 'expired'){
-          wireColor  = COLORS.wireExpired;
-          cargoColor = COLORS.cargoExpired;
+        if (bin.occupied) {
+            if (bin.expStatus === 'near') {
+                wireColor  = COLORS.wireNear;
+                cargoColor = COLORS.cargoNear;
 
-          const phase = (bin.row * 7 + bin.bay * 13 + bin.level * 17);
+                bin.cargo.position.y =
+                    bin.baseY + Math.sin(t * speedNear) * ampNear;
 
-          bin.cargo.position.x =
-            bin.baseX + Math.sin(t * speedExpPos + phase) * ampExpPos;
-          bin.cargo.position.z =
-            bin.baseZ + Math.cos(t * speedExpPos + phase) * ampExpPos;
-          bin.cargo.position.y =
-            bin.baseY + Math.sin(t * speedExpPos * 0.7 + phase) * ampExpY;
+                opacity = 0.9;
 
-          const flash = 0.40 + 0.45 * (0.5 + 0.5 * Math.sin(t * 12 + phase));
-          opacity = flash;
-        }else{
-          wireColor  = COLORS.wireNormal;
-          cargoColor = COLORS.cargoNormal;
-          opacity = 0.7;
+            } else if (bin.expStatus === 'expired') {
+                wireColor  = COLORS.wireExpired;
+                cargoColor = COLORS.cargoExpired;
+
+                const phase = (bin.row * 7 + bin.bay * 13 + bin.level * 17);
+
+                bin.cargo.position.x =
+                    bin.baseX + Math.sin(t * speedExpPos + phase) * ampExpPos;
+
+                bin.cargo.position.z =
+                    bin.baseZ + Math.cos(t * speedExpPos + phase) * ampExpPos;
+
+                bin.cargo.position.y =
+                    bin.baseY + Math.sin(t * speedExpPos * 0.7 + phase) * ampExpY;
+
+                const flash = 0.40 + 0.45 * (0.5 + 0.5 * Math.sin(t * 12 + phase));
+                opacity = flash;
+
+            } else {
+                wireColor  = COLORS.wireNormal;
+                cargoColor = COLORS.cargoNormal;
+                opacity = 0.7;
+            }
         }
-      }
 
-      if (bin === highlightedBin && nowT < highlightEndTime){
-        wireColor = COLORS.wireHighlight;
-        opacity   = 1.0;
-      }
+        if (bin === highlightedBin && nowT < highlightEndTime) {
+            wireColor = COLORS.wireHighlight;
+            opacity   = 1.0;
+        }
 
-      lineMat.color.setHex(wireColor);
-      lineMat.opacity = opacity;
-      cargoMat.color.setHex(cargoColor);
+        lineMat.color.setHex(wireColor);
+        lineMat.opacity = opacity;
+        cargoMat.color.setHex(cargoColor);
     }
 
     controls.update();
     renderer.render(scene, camera);
-  });
+});
 
-  ui.rebuildBtn.addEventListener('click', rebuild);
-  ui.randomBtn.addEventListener('click', randomFill);
-  ui.syncExcelBtn.addEventListener('click', syncFromExcel);
-  ui.exportExcelBtn.addEventListener('click', exportToExcel);
-  ui.searchBtn.addEventListener('click', handleSearch);
-  ui.searchSlot.addEventListener('keydown', (e)=>{
+ui.rebuildBtn.addEventListener('click', rebuild);
+ui.randomBtn.addEventListener('click', randomFill);
+ui.syncExcelBtn.addEventListener('click', syncFromExcel);
+ui.exportExcelBtn.addEventListener('click', exportToExcel);
+ui.searchBtn.addEventListener('click', handleSearch);
+
+ui.searchSlot.addEventListener('keydown', (e)=>{
     if (e.key === 'Enter') handleSearch();
-  });
+});
 
-  window.addEventListener('resize', ()=>{
+window.addEventListener('resize', ()=>{
     const s = getSize();
     camera.aspect = s.w/s.h;
     camera.updateProjectionMatrix();
     renderer.setSize(s.w,s.h);
-  });
+});
 
-  loadParamsFromStorage();
-  loadSlotsFromStorage();
-  loadImportTimeFromStorage();
-  rebuild();          
-  applyLogicalSlotsToBins();
-</script>
-</body>
-</html>
+loadParamsFromStorage();
+loadSlotsFromStorage();
+loadImportTimeFromStorage();
+
+rebuild();
+applyLogicalSlotsToBins();
