@@ -1,13 +1,14 @@
 services:
-  - type: web
+  # 1️⃣ Frontend
+  - type: static
     name: warehouse-3d-frontend
     rootDir: frontend
-    env: static
     buildCommand: ""
     staticPublishPath: "."
     autoDeploy: true
     plan: free
 
+  # 2️⃣ WebSocket (Node.js)
   - type: web
     name: warehouse-3d-websocket
     rootDir: backend-node
@@ -17,11 +18,12 @@ services:
     autoDeploy: true
     plan: free
 
+  # 3️⃣ Python API (FastAPI / Uvicorn)
   - type: web
     name: warehouse-3d-python-api
     rootDir: backend-python
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn app.api.main:app --host 0.0.0.0 --port 10000"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port 10000"
     autoDeploy: true
     plan: free
