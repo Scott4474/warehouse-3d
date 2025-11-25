@@ -1,10 +1,12 @@
 services:
-
-  - type: static
+  - type: web
     name: warehouse-3d-frontend
     rootDir: frontend
+    env: static
     buildCommand: ""
-    publishDir: "."
+    staticPublishPath: "."
+    autoDeploy: true
+    plan: free
 
   - type: web
     name: warehouse-3d-websocket
